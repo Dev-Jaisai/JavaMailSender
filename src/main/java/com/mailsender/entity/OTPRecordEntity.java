@@ -30,4 +30,7 @@ public class OTPRecordEntity {
         this.hashedOTP = hashedOTP;
         this.expiry = expiry;
     }
+    public boolean isExpired() {
+        return Instant.now().isAfter(expiry);
+    }
 }

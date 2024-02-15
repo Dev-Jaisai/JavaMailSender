@@ -2,7 +2,9 @@ package com.mailsender.service;
 
 import com.mailsender.entity.OTPRecordEntity;
 import com.mailsender.repo.OTPRecordRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Service;
 
@@ -10,19 +12,21 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
+@Slf4j
 public class OTPService {
     @Autowired
     private OTPRecordRepository otpRecordRepository; // Assuming you have an OTPRecordRepository interface
 
     private static final int OTP_LENGTH = 6;
-    private static final int OTP_VALIDITY_MINUTES = 5;
+    private static final int OTP_VALIDITY_MINUTES = 1;
     private static final SecureRandom random = new SecureRandom();
 
     // Replace with your database/storage mechanism
-    private Map<String, OTPRecord> otpStorage = new HashMap<>();
+    private Map<String, OTPRecordEntity> otpStorage = new HashMap<>();
 
     public String generateOTP(String userId) {
         String otp = generateRandomOTP();
@@ -35,18 +39,17 @@ public class OTPService {
 
         return otp; // Send this OTP to the user (SMS, email, etc.)
     }
-
     public boolean validateOTP(String userId, String providedOTP) {
-        OTPRecord otpRecord = otpStorage.get(userId);
+        OTPRecordEntity otpRecordEntity = otpRecordRepository.findByUserId(userId);
 
-        if (otpRecord == null || otpRecord.isExpired()) {
+        if (otpRecordEntity == null || otpRecordEntity.isExpired()) {
             return false;
         }
 
-        boolean isValid = compareHashedOTP(providedOTP, otpRecord.getHashedOTP());
+        boolean isValid = compareHashedOTP(providedOTP, otpRecordEntity.getHashedOTP());
 
         if (isValid) {
-            otpStorage.remove(userId); // Cleanup after validation
+            otpRecordRepository.delete(otpRecordEntity); // Cleanup after validation
         }
 
         return isValid;
@@ -64,39 +67,23 @@ public class OTPService {
         return Instant.now().plus(OTP_VALIDITY_MINUTES, ChronoUnit.MINUTES);
     }
 
-    // Placeholder - Implement strong hashing
     private String hashOTP(String otp) {
-        // TODO: Use bcrypt, Argon2, etc.
         return BCrypt.hashpw(otp, BCrypt.gensalt());
     }
 
-    // Placeholder - Implement secure comparison
     private boolean compareHashedOTP(String providedOTP, String hashedOTP) {
-        // TODO: Constant-time comparison
-        return hashedOTP.equals(providedOTP); // Remove in production
+        return BCrypt.checkpw(providedOTP, hashedOTP);
     }
 
-    private static class OTPRecord {
-        private final String userId;
-        private final String hashedOTP;
-        private final Instant expiry;
+    @Scheduled(cron = "0 */1 * * * *") // Runs every 1 minutes
+    public void deleteExpiredOTPRecordsScheduled() {
+        log.info("Into schedular");
+        deleteExpiredOTPRecords();
+    }
+    public void deleteExpiredOTPRecords() {
+        List<OTPRecordEntity> expiredRecords = otpRecordRepository.findExpiredRecords(Instant.now());
+        log.info("deletd after expiration of otps");
 
-        public OTPRecord(String userId, String hashedOTP, Instant expiry) {
-            this.userId = userId;
-            this.hashedOTP = hashedOTP;
-            this.expiry = expiry;
-        }
-
-        public boolean isExpired() {
-            return Instant.now().isAfter(expiry);
-        }
-
-        public String getUserId() {
-            return userId;
-        }
-
-        public String getHashedOTP() {
-            return hashedOTP;
-        }
+        otpRecordRepository.deleteAll(expiredRecords);
     }
 }
